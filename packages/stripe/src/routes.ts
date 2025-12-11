@@ -610,12 +610,18 @@ export const cancelSubscriptionCallback = (options: StripeOptions) => {
 					const currentSubscription = stripeSubscription.data.find(
 						(sub) => sub.id === subscription.stripeSubscriptionId,
 					);
-					if (currentSubscription?.cancel_at_period_end === true) {
+					if (
+						currentSubscription?.cancel_at_period_end === true ||
+						currentSubscription?.cancel_at
+					) {
 						await ctx.context.adapter.update({
 							model: "subscription",
 							update: {
 								status: currentSubscription?.status,
-								cancelAtPeriodEnd: true,
+								cancelAtPeriodEnd: currentSubscription.cancel_at_period_end,
+								cancelAt: currentSubscription.cancel_at
+									? new Date(currentSubscription.cancel_at * 1000)
+									: null,
 							},
 							where: [
 								{
@@ -783,11 +789,21 @@ export const cancelSubscription = (options: StripeOptions) => {
 						 * in-case we missed the event from stripe, we set it manually
 						 * this is a rare case and should not happen
 						 */
-						if (!subscription.cancelAtPeriodEnd) {
+						if (!subscription.cancelAtPeriodEnd && !subscription.cancelAt) {
+							// Fetch the current subscription state from Stripe to get accurate cancel_at
+							const stripeSubList = await client.subscriptions.list({
+								customer: subscription.stripeCustomerId!,
+							});
+							const stripeSub = stripeSubList.data.find(
+								(s) => s.id === subscription.stripeSubscriptionId,
+							);
 							await ctx.context.adapter.updateMany({
 								model: "subscription",
 								update: {
-									cancelAtPeriodEnd: true,
+									cancelAtPeriodEnd: stripeSub?.cancel_at_period_end ?? true,
+									cancelAt: stripeSub?.cancel_at
+										? new Date(stripeSub.cancel_at * 1000)
+										: null,
 								},
 								where: [
 									{
@@ -885,7 +901,7 @@ export const restoreSubscription = (options: StripeOptions) => {
 					message: STRIPE_ERROR_CODES.SUBSCRIPTION_NOT_ACTIVE,
 				});
 			}
-			if (!subscription.cancelAtPeriodEnd) {
+			if (!subscription.cancelAtPeriodEnd && !subscription.cancelAt) {
 				throw ctx.error("BAD_REQUEST", {
 					message:
 						STRIPE_ERROR_CODES.SUBSCRIPTION_NOT_SCHEDULED_FOR_CANCELLATION,
@@ -909,10 +925,12 @@ export const restoreSubscription = (options: StripeOptions) => {
 			}
 
 			try {
+				// Clear both cancel_at_period_end and cancel_at to fully restore the subscription
 				const newSub = await client.subscriptions.update(
 					activeSubscription.id,
 					{
 						cancel_at_period_end: false,
+						cancel_at: "" as unknown as number, // Empty string clears cancel_at in Stripe API
 					},
 				);
 
@@ -920,6 +938,7 @@ export const restoreSubscription = (options: StripeOptions) => {
 					model: "subscription",
 					update: {
 						cancelAtPeriodEnd: false,
+						cancelAt: null,
 						updatedAt: new Date(),
 					},
 					where: [

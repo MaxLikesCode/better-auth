@@ -155,8 +155,14 @@ export interface Subscription {
 	periodEnd?: Date | undefined;
 	/**
 	 * Cancel at period end
+	 * @deprecated Use cancelAt instead for more precise cancellation scheduling
 	 */
 	cancelAtPeriodEnd?: boolean | undefined;
+	/**
+	 * Unix timestamp indicating when the subscription will be canceled.
+	 * This is the preferred way to schedule cancellations in newer Stripe API versions.
+	 */
+	cancelAt?: Date | undefined;
 	/**
 	 * A field to group subscriptions so you can have multiple subscriptions
 	 * for one reference id
